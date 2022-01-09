@@ -47,6 +47,10 @@ LDEVOBJ_pLoadDriver(
     _In_z_ LPWSTR pwszDriverName,
     _In_ ULONG ldevtype);
 
+BOOLEAN
+LDEVOBJ_bBuildDevmodeList(
+    _Inout_ PGRAPHICS_DEVICE pGraphicsDevice);
+
 PLDEVOBJ
 NTAPI
 EngGetLDEV(
