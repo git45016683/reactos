@@ -213,37 +213,6 @@ LDEVOBJ_bLoadImage(
 }
 
 static
-VOID
-LDEVOBJ_vUnloadImage(
-    _Inout_ PLDEVOBJ pldev)
-{
-    NTSTATUS Status;
-
-    /* Make sure we have a driver info */
-    ASSERT(pldev && pldev->pGdiDriverInfo != NULL);
-
-    /* Check if we have loaded a driver */
-    if (pldev->pfn.DisableDriver)
-    {
-        /* Call the unload function */
-        pldev->pfn.DisableDriver();
-    }
-
-    /* Unload the driver */
-    Status = ZwSetSystemInformation(SystemUnloadGdiDriverInformation,
-                                    &pldev->pGdiDriverInfo->SectionPointer,
-                                    sizeof(HANDLE));
-    if (!NT_SUCCESS(Status))
-    {
-        ERR("Failed to unload the driver, this is bad.\n");
-    }
-
-    /* Free the driver info structure */
-    ExFreePoolWithTag(pldev->pGdiDriverInfo, GDITAG_LDEV);
-    pldev->pGdiDriverInfo = NULL;
-}
-
-static
 BOOL
 LDEVOBJ_bEnableDriver(
     _Inout_ PLDEVOBJ pldev)
@@ -275,6 +244,68 @@ LDEVOBJ_bEnableDriver(
 
     /* Return success. */
     return TRUE;
+}
+
+static
+VOID
+LDEVOBJ_vUnloadImage(
+    _Inout_ PLDEVOBJ pldev)
+{
+    NTSTATUS Status;
+
+    /* Make sure we have a driver info */
+    ASSERT(pldev && pldev->pGdiDriverInfo != NULL);
+
+    TRACE("LDEVOBJ_vUnloadImage('%wZ')\n", &pldev->pGdiDriverInfo->DriverName);
+
+    /* Decrement reference count */
+    pldev->cRefs--;
+
+    /* More references left? */
+    if (pldev->cRefs > 0)
+        return;
+
+    /* Check if we have loaded a driver */
+    if (pldev->pfn.DisableDriver)
+    {
+        /* Call the unload function */
+        pldev->pfn.DisableDriver();
+    }
+
+    /* Unload the driver */
+#if 0
+    Status = ZwSetSystemInformation(SystemUnloadGdiDriverInformation,
+                                    &pldev->pGdiDriverInfo->SectionPointer,
+                                    sizeof(HANDLE));
+#else
+    /* Unfortunately, ntoskrnl allows unloading a driver, but fails loading
+     * it again with STATUS_IMAGE_ALREADY_LOADED. Prevent this problem by
+     * never unloading any driver.
+     */
+    UNIMPLEMENTED;
+    Status = STATUS_NOT_IMPLEMENTED;
+#endif
+    if (NT_SUCCESS(Status))
+    {
+        /* Lock loader */
+        EngAcquireSemaphore(ghsemLDEVList);
+
+        /* Remove ldev from the list */
+        RemoveEntryList(&pldev->leLink);
+
+        /* Unlock loader */
+        EngReleaseSemaphore(ghsemLDEVList);
+
+        /* Free the driver info structure */
+        ExFreePoolWithTag(pldev->pGdiDriverInfo, GDITAG_LDEV);
+        pldev->pGdiDriverInfo = NULL;
+        LDEVOBJ_vFreeLDEV(pldev);
+    }
+    else
+    {
+        WARN("Failed to unload driver '%wZ', trying to re-enable it.\n", &pldev->pGdiDriverInfo->DriverName);
+        LDEVOBJ_bEnableDriver(pldev);
+    }
 }
 
 static
@@ -325,7 +356,7 @@ LDEVOBJ_pvFindImageProcAddress(
 
 PLDEVOBJ
 NTAPI
-EngLoadImageEx(
+LDEVOBJ_pLoadDriver(
     _In_z_ LPWSTR pwszDriverName,
     _In_ ULONG ldevtype)
 {
@@ -336,7 +367,7 @@ EngLoadImageEx(
     SIZE_T cwcLength;
     LPWSTR pwsz;
 
-    TRACE("EngLoadImageEx(%ls, %lu)\n", pwszDriverName, ldevtype);
+    TRACE("LDEVOBJ_pLoadDriver(%ls, %lu)\n", pwszDriverName, ldevtype);
     ASSERT(pwszDriverName);
 
     /* Initialize buffer for the the driver name */
@@ -427,7 +458,6 @@ EngLoadImageEx(
 
                 /* Unload the image. */
                 LDEVOBJ_vUnloadImage(pldev);
-                LDEVOBJ_vFreeLDEV(pldev);
                 pldev = NULL;
                 goto leave;
             }
@@ -444,7 +474,7 @@ leave:
     /* Unlock loader */
     EngReleaseSemaphore(ghsemLDEVList);
 
-    TRACE("EngLoadImageEx returning %p\n", pldev);
+    TRACE("LDEVOBJ_pLoadDriver returning %p\n", pldev);
     return pldev;
 }
 
@@ -456,7 +486,7 @@ APIENTRY
 EngLoadImage(
     _In_ LPWSTR pwszDriverName)
 {
-    return (HANDLE)EngLoadImageEx(pwszDriverName, LDEV_IMAGE);
+    return (HANDLE)LDEVOBJ_pLoadDriver(pwszDriverName, LDEV_IMAGE);
 }
 
 
@@ -470,25 +500,8 @@ EngUnloadImage(
     /* Make sure the LDEV is in the list */
     ASSERT((pldev->leLink.Flink != NULL) &&  (pldev->leLink.Blink != NULL));
 
-    /* Lock loader */
-    EngAcquireSemaphore(ghsemLDEVList);
-
-    /* Decrement reference count */
-    pldev->cRefs--;
-
-    /* No more references left? */
-    if (pldev->cRefs == 0)
-    {
-        /* Remove ldev from the list */
-        RemoveEntryList(&pldev->leLink);
-
-        /* Unload the image and free the LDEV */
-        LDEVOBJ_vUnloadImage(pldev);
-        LDEVOBJ_vFreeLDEV(pldev);
-    }
-
-    /* Unlock loader */
-    EngReleaseSemaphore(ghsemLDEVList);
+    /* Unload the image and free the LDEV if required */
+    LDEVOBJ_vUnloadImage(pldev);
 }
 
 
