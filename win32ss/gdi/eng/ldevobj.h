@@ -42,6 +42,11 @@ LDEVOBJ_ulGetDriverModes(
     _Out_ PDEVMODEW *ppdm);
 
 PLDEVOBJ
+LDEVOBJ_pLoadInternal(
+    _In_ PFN_DrvEnableDriver pfnEnableDriver,
+    _In_ ULONG ldevtype);
+
+PLDEVOBJ
 APIENTRY
 LDEVOBJ_pLoadDriver(
     _In_z_ LPWSTR pwszDriverName,
