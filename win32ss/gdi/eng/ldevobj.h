@@ -34,11 +34,12 @@ NTSTATUS
 NTAPI
 InitLDEVImpl(VOID);
 
-PDEVMODEINFO
-NTAPI
-LDEVOBJ_pdmiGetModes(
-    _In_ PLDEVOBJ pldev,
-    _In_ HANDLE hDriver);
+/* Get all available device modes from a driver; return them in *pdm + size required */
+ULONG
+LDEVOBJ_ulGetDriverModes(
+    _In_ LPWSTR pwszDriverName,
+    _In_ HANDLE hDriver,
+    _Out_ PDEVMODEW *ppdm);
 
 PLDEVOBJ
 APIENTRY
