@@ -243,6 +243,32 @@ PDEVOBJ_vCompletePDEV(
     ppdev->pldev->pfn.CompletePDEV(ppdev->dhpdev, (HDEV)ppdev);
 }
 
+static
+VOID
+PDEVOBJ_vFilterDriverHooks(
+    _In_ PPDEVOBJ ppdev)
+{
+    PLDEVOBJ pldev = ppdev->pldev;
+    ULONG dwAccelerationLevel = ppdev->dwAccelerationLevel;
+
+    if (!pldev->pGdiDriverInfo)
+        return;
+    if (pldev->ldevtype != LDEV_DEVICE_DISPLAY)
+        return;
+
+    if (dwAccelerationLevel >= 1)
+    {
+        ppdev->apfn[INDEX_DrvSetPointerShape] = NULL;
+        ppdev->apfn[INDEX_DrvCreateDeviceBitmap] = NULL;
+    }
+
+    if (dwAccelerationLevel >= 2)
+    {
+        /* FIXME: handle other acceleration levels */
+        UNIMPLEMENTED;
+    }
+}
+
 PSURFACE
 NTAPI
 PDEVOBJ_pSurface(
@@ -354,6 +380,7 @@ PPDEVOBJ
 PDEVOBJ_Create(
     _In_opt_ PGRAPHICS_DEVICE pGraphicsDevice,
     _In_opt_ PDEVMODEW pdm,
+    _In_ ULONG dwAccelerationLevel,
     _In_ ULONG ldevtype)
 {
     PPDEVOBJ ppdev, ppdevMatch = NULL;
@@ -375,7 +402,8 @@ PDEVOBJ_Create(
             {
                 PDEVOBJ_vReference(ppdev);
 
-                if (RtlEqualMemory(pdm, ppdev->pdmwDev, sizeof(DEVMODEW)))
+                if (RtlEqualMemory(pdm, ppdev->pdmwDev, sizeof(DEVMODEW)) &&
+                    ppdev->dwAccelerationLevel == dwAccelerationLevel)
                 {
                     PDEVOBJ_vReference(ppdev);
                     ppdevMatch = ppdev;
@@ -441,6 +469,7 @@ PDEVOBJ_Create(
 
     /* Initialize PDEV */
     ppdev->pldev = pldev;
+    ppdev->dwAccelerationLevel = dwAccelerationLevel;
 
     /* Call the driver to enable the PDEV */
     if (!PDEVOBJ_bEnablePDEV(ppdev, pdm, NULL))
@@ -453,6 +482,9 @@ PDEVOBJ_Create(
 
     /* Copy the function table */
     ppdev->pfn = ppdev->pldev->pfn;
+
+    /* Remove some acceleration capabilities from driver */
+    PDEVOBJ_vFilterDriverHooks(ppdev);
 
     /* Set MovePointer function */
     ppdev->pfnMovePointer = ppdev->pfn.MovePointer;
@@ -579,7 +611,7 @@ PDEVOBJ_bSwitchMode(
     }
 
     /* 2. Create new PDEV */
-    ppdevTmp = PDEVOBJ_Create(ppdev->pGraphicsDevice, pdm, LDEV_DEVICE_DISPLAY);
+    ppdevTmp = PDEVOBJ_Create(ppdev->pGraphicsDevice, pdm, 0, LDEV_DEVICE_DISPLAY);
     if (!ppdevTmp)
     {
         DPRINT1("Failed to create a new PDEV\n");
